@@ -7,9 +7,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    body {
-      font-family: 'Montserrat', sans-serif;
-    }
+    body { font-family: 'Montserrat', sans-serif; }
     .bg-custom { background-color: #f5f0e1; }
     .bg-card { background-color: #fff; }
     .text-primary { color: #4b3c2e; }
@@ -29,9 +27,9 @@
   </header>
 
   <div id="kanbanBoard" class="grid grid-cols-3 gap-4 w-full max-w-4xl">
-    <div id="todo" class="bg-card p-4 rounded-lg shadow"> <h2 class="text-2xl font-semibold mb-2 text-primary">To Do</h2></div>
-    <div id="inProgress" class="bg-card p-4 rounded-lg shadow"> <h2 class="text-2xl font-semibold mb-2 text-primary">In Progress</h2></div>
-    <div id="done" class="bg-card p-4 rounded-lg shadow"> <h2 class="text-2xl font-semibold mb-2 text-primary">Done</h2></div>
+    <div id="todo" class="bg-card p-4 rounded-lg shadow"><h2 class="text-2xl font-semibold mb-2 text-primary">To Do</h2></div>
+    <div id="inProgress" class="bg-card p-4 rounded-lg shadow"><h2 class="text-2xl font-semibold mb-2 text-primary">In Progress</h2></div>
+    <div id="done" class="bg-card p-4 rounded-lg shadow"><h2 class="text-2xl font-semibold mb-2 text-primary">Done</h2></div>
   </div>
 
   <button onclick="openProjectModal()" class="mt-4 px-4 py-2 btn-primary rounded-lg shadow">Nuevo Proyecto</button>
@@ -46,6 +44,15 @@
         <option value="Media">Media Prioridad</option>
         <option value="Baja">Baja Prioridad</option>
       </select>
+
+      <!-- Drag-and-Drop Image Upload -->
+      <div id="dropZone" class="border-2 border-dashed border-gray-300 p-4 rounded text-center text-gray-500 mb-4"
+        ondrop="handleDrop(event)" ondragover="event.preventDefault()">
+        Arrastra las imágenes aquí o haz clic para seleccionarlas
+        <input id="projectImages" type="file" accept="image/*" multiple class="hidden" onchange="handleFileSelect(event)">
+      </div>
+      <div id="imagePreview" class="flex flex-wrap gap-2 mb-4"></div>
+
       <div class="flex justify-end">
         <button onclick="closeProjectModal()" class="px-4 py-2 btn-primary rounded-lg">Cancelar</button>
         <button onclick="saveProject()" class="px-4 py-2 btn-primary rounded-lg">Guardar</button>
@@ -56,9 +63,9 @@
   <script>
     let projects = JSON.parse(localStorage.getItem("projects")) || [];
     let editingProjectId = null;
+    let selectedImages = [];
 
     document.addEventListener("DOMContentLoaded", loadProjects);
-
     document.getElementById("searchBar").addEventListener("input", filterProjects);
     document.getElementById("categoryFilter").addEventListener("change", filterProjects);
 
@@ -82,6 +89,7 @@
             <h4 class="font-semibold text-primary">${project.title}</h4>
             <p class="text-sm">${project.description}</p>
             <span class="text-xs text-gray-500">Prioridad: ${project.category}</span>
+            ${project.images.map(img => `<img src="${img}" class="w-16 h-16 object-cover mt-2 rounded-lg">`).join('')}
           `;
           column.appendChild(projectEl);
         });
@@ -95,10 +103,13 @@
       document.getElementById("projectTitle").value = project ? project.title : "";
       document.getElementById("projectDescription").value = project ? project.description : "";
       document.getElementById("projectCategory").value = project ? project.category : "Alta";
+      selectedImages = project && project.images ? project.images.slice() : [];
+      renderImagePreview();
     }
 
     function closeProjectModal() {
       document.getElementById("projectModal").classList.add("hidden");
+      selectedImages = [];
     }
 
     function saveProject() {
@@ -116,6 +127,7 @@
         title,
         description,
         category,
+        images: selectedImages,
         status: "todo"
       };
 
@@ -129,6 +141,29 @@
       localStorage.setItem("projects", JSON.stringify(projects));
       closeProjectModal();
       loadProjects();
+    }
+
+    function handleFileSelect(event) {
+      const files = event.target.files || event.dataTransfer.files;
+      Array.from(files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = e => {
+          selectedImages.push(e.target.result);
+          renderImagePreview();
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function renderImagePreview() {
+      const previewContainer = document.getElementById("imagePreview");
+      previewContainer.innerHTML = "";
+      selectedImages.forEach(src => {
+        const img = document.createElement("img");
+        img.src = src;
+        img.className = "w-16 h-16 object-cover rounded-lg shadow";
+        previewContainer.appendChild(img);
+      });
     }
 
     function drag(event, projectId) {
@@ -154,6 +189,9 @@
           (!category || project.category === category)
         );
       });
+      const columns = { todo:Here is the rest of the JavaScript to continue filtering and rendering the kanban columns after filtering:
+
+```html
       const columns = { todo: [], inProgress: [], done: [] };
       filteredProjects.forEach(project => columns[project.status].push(project));
       renderProjects(columns);
@@ -162,6 +200,10 @@
     ["todo", "inProgress", "done"].forEach(status => {
       document.getElementById(status).addEventListener("drop", drop);
       document.getElementById(status).addEventListener("dragover", event => event.preventDefault());
+    });
+
+    document.getElementById("dropZone").addEventListener("click", () => {
+      document.getElementById("projectImages").click();
     });
   </script>
 </body>
