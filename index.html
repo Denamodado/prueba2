@@ -5,16 +5,17 @@
     <title>Previsualizador de Imágenes</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* Puedes agregar estilos adicionales aquí si lo deseas */
-    </style>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col">
 
     <!-- Instrucciones -->
     <div class="p-4 bg-blue-500 text-white text-center">
         <h1 class="text-2xl font-bold">Previsualizador de Imágenes</h1>
-        <p>Abre y utiliza la aplicación haciendo doble clic en este archivo HTML.</p>
+        <p>Utiliza la aplicación para cargar y compartir imágenes en línea.</p>
     </div>
 
     <!-- Contenedor principal -->
@@ -37,19 +38,25 @@
 
     <!-- JavaScript -->
     <script>
-        // Variables globales
-        let images = [];
+        // Configuración de Firebase
+        const firebaseConfig = {
+            apiKey: "TU_API_KEY",
+            authDomain: "TU_AUTH_DOMAIN",
+            projectId: "TU_PROJECT_ID",
+            storageBucket: "TU_STORAGE_BUCKET",
+            messagingSenderId: "TU_MESSAGING_SENDER_ID",
+            appId: "TU_APP_ID",
+            databaseURL: "TU_DATABASE_URL"
+        };
 
-        // Tu Client ID de Imgur
-        const CLIENT_ID = 'TU_CLIENT_ID';
+        // Inicializar Firebase
+        firebase.initializeApp(firebaseConfig);
+        const storage = firebase.storage();
+        const database = firebase.database();
 
-        // Cargar imágenes desde LocalStorage al iniciar
+        // Asignar eventos al cargar el DOM
         document.addEventListener('DOMContentLoaded', () => {
-            // Cargar imágenes desde LocalStorage
-            if (localStorage.getItem('images')) {
-                images = JSON.parse(localStorage.getItem('images'));
-                updateGallery();
-            }
+            loadImages();
 
             // Elementos del DOM
             const dropArea = document.getElementById('drop-area');
@@ -86,53 +93,61 @@
 
         // Manejar archivos seleccionados
         function handleFiles(files) {
-            [...files].forEach(uploadImage);
+            [...files].forEach(uploadFile);
         }
 
-        // Subir imagen a Imgur
-        function uploadImage(file) {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = function() {
-                const base64Image = reader.result.split(',')[1];
-                const url = 'https://api.imgur.com/3/image';
+        // Subir archivo a Firebase Storage
+        function uploadFile(file) {
+            const storageRef = storage.ref('images/' + Date.now() + '_' + file.name);
+            const uploadTask = storageRef.put(file);
 
-                fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        Authorization: 'Client-ID ' + CLIENT_ID,
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        image: base64Image,
-                        type: 'base64',
-                    }),
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        const imageUrl = data.data.link;
-                        images.push(imageUrl);
-                        saveImages();
-                        updateGallery();
-                    } else {
-                        console.error('Error al subir la imagen:', data);
-                        alert('Se produjo un error al subir la imagen.');
-                    }
-                })
-                .catch(error => {
-                    console.error('Error al subir la imagen:', error);
-                    alert('Se produjo un error al subir la imagen.');
+            uploadTask.on('state_changed',
+                (snapshot) => {
+                    // Progreso de la carga (opcional)
+                },
+                (error) => {
+                    console.error('Error al cargar el archivo:', error);
+                    alert('Se produjo un error al cargar la imagen.');
+                },
+                () => {
+                    // Carga exitosa
+                    uploadTask.snapshot.ref.getDownloadURL().then((downloadURL) => {
+                        saveImageData(file.name, downloadURL);
+                    });
+                }
+            );
+        }
+
+        // Guardar datos de la imagen en Firebase Database
+        function saveImageData(fileName, downloadURL) {
+            const imageData = {
+                name: fileName,
+                url: downloadURL,
+                timestamp: Date.now()
+            };
+            const newImageKey = database.ref().child('images').push().key;
+            const updates = {};
+            updates['/images/' + newImageKey] = imageData;
+            database.ref().update(updates).then(() => {
+                loadImages();
+            });
+        }
+
+        // Cargar imágenes desde Firebase Database
+        function loadImages() {
+            database.ref('images/').orderByChild('timestamp').once('value').then((snapshot) => {
+                const images = [];
+                snapshot.forEach((childSnapshot) => {
+                    const imageData = childSnapshot.val();
+                    imageData.key = childSnapshot.key;
+                    images.push(imageData);
                 });
-            };
-            reader.onerror = function(error) {
-                console.error('Error al leer el archivo:', error);
-                alert('Se produjo un error al cargar la imagen.');
-            };
+                updateGallery(images.reverse());
+            });
         }
 
         // Actualizar galería
-        function updateGallery() {
+        function updateGallery(images) {
             const gallery = document.getElementById('gallery');
             gallery.innerHTML = '';
 
@@ -142,7 +157,10 @@
                 document.getElementById('placeholder-text').style.display = 'none';
             }
 
-            images.forEach((imageSrc, index) => {
+            images.forEach((imageData) => {
+                const imageSrc = imageData.url;
+                const key = imageData.key;
+
                 const div = document.createElement('div');
                 div.classList.add('relative', 'group');
 
@@ -156,9 +174,7 @@
                 deleteBtn.setAttribute('aria-label', 'Eliminar imagen');
                 deleteBtn.classList.add('absolute', 'top-2', 'right-2', 'bg-red-500', 'text-white', 'rounded-full', 'w-8', 'h-8', 'flex', 'items-center', 'justify-center', 'opacity-0', 'group-hover:opacity-100', 'transition');
                 deleteBtn.onclick = () => {
-                    images.splice(index, 1);
-                    saveImages();
-                    updateGallery();
+                    deleteImage(key, imageData.name);
                 };
 
                 div.appendChild(img);
@@ -167,10 +183,21 @@
             });
         }
 
-        // Guardar imágenes en LocalStorage
-        function saveImages() {
-            localStorage.setItem('images', JSON.stringify(images));
+        // Eliminar imagen de Firebase
+        function deleteImage(key, fileName) {
+            // Eliminar de Firebase Storage
+            const storageRef = storage.refFromURL(fileName);
+            storageRef.delete().then(() => {
+                // Eliminar de Firebase Database
+                database.ref('images/' + key).remove().then(() => {
+                    loadImages();
+                });
+            }).catch((error) => {
+                console.error('Error al eliminar la imagen:', error);
+                alert('No se pudo eliminar la imagen.');
+            });
         }
+
     </script>
 </body>
 </html>
