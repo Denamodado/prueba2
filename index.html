@@ -5,15 +5,9 @@
     <title>Previsualizador de Imágenes</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Firebase SDKs -->
-    <!-- Importa las librerías de Firebase solo si la aplicación está en línea -->
-    <script>
-        if (location.protocol !== 'file:') {
-            document.write('<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"><\/script>');
-            document.write('<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"><\/script>');
-            document.write('<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"><\/script>');
-        }
-    </script>
+    <style>
+        /* Añade estilos adicionales si es necesario */
+    </style>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col">
 
@@ -44,33 +38,14 @@
     <!-- JavaScript -->
     <script>
         // Variables globales
-        let db; // Para IndexedDB
-        let isOnline = location.protocol !== 'file:';
+        let images = [];
 
-        if (isOnline) {
-            // Configuración de Firebase
-            const firebaseConfig = {
-                apiKey: "TU_API_KEY",
-                authDomain: "TU_AUTH_DOMAIN",
-                projectId: "TU_PROJECT_ID",
-                storageBucket: "TU_STORAGE_BUCKET",
-                messagingSenderId: "TU_MESSAGING_SENDER_ID",
-                appId: "TU_APP_ID",
-                databaseURL: "TU_DATABASE_URL"
-            };
-
-            // Inicializar Firebase
-            firebase.initializeApp(firebaseConfig);
-            var storage = firebase.storage();
-            var database = firebase.database();
-        }
-
-        // Asignar eventos al cargar el DOM
+        // Cargar imágenes desde LocalStorage al iniciar y asignar eventos
         document.addEventListener('DOMContentLoaded', () => {
-            if (isOnline) {
-                loadImagesOnline();
-            } else {
-                initDB();
+            // Cargar imágenes desde LocalStorage
+            if (localStorage.getItem('images')) {
+                images = JSON.parse(localStorage.getItem('images'));
+                updateGallery();
             }
 
             // Elementos del DOM
@@ -108,41 +83,18 @@
 
         // Manejar archivos seleccionados
         function handleFiles(files) {
-            [...files].forEach(file => {
-                if (isOnline) {
-                    uploadFileOnline(file);
-                } else {
-                    previewFileLocal(file);
-                }
-            });
+            [...files].forEach(previewFile);
         }
 
-        /*** Modo Offline (Local) ***/
-        // Inicializar IndexedDB
-        function initDB() {
-            const request = indexedDB.open('imageDB', 1);
-
-            request.onupgradeneeded = function(event) {
-                db = event.target.result;
-                db.createObjectStore('images', { keyPath: 'id', autoIncrement: true });
-            };
-
-            request.onsuccess = function(event) {
-                db = event.target.result;
-                loadImagesLocal();
-            };
-
-            request.onerror = function(event) {
-                console.error('Error al abrir IndexedDB:', event.target.errorCode);
-            };
-        }
-
-        // Previsualizar y almacenar archivos localmente
-        function previewFileLocal(file) {
+        // Previsualizar y almacenar archivos
+        function previewFile(file) {
             const reader = new FileReader();
             reader.readAsDataURL(file);
             reader.onload = function(event) {
-                saveImageLocal(event.target.result);
+                const imageDataUrl = event.target.result;
+                images.push(imageDataUrl);
+                saveImages();
+                updateGallery();
             };
             reader.onerror = function(error) {
                 console.error('Error al leer el archivo:', error);
@@ -150,35 +102,8 @@
             };
         }
 
-        // Guardar imagen en IndexedDB
-        function saveImageLocal(imageDataUrl) {
-            const transaction = db.transaction(['images'], 'readwrite');
-            const objectStore = transaction.objectStore('images');
-            const request = objectStore.add({ data: imageDataUrl });
-
-            request.onsuccess = function(event) {
-                loadImagesLocal();
-            };
-
-            request.onerror = function(event) {
-                console.error('Error al guardar la imagen:', event.target.errorCode);
-            };
-        }
-
-        // Cargar imágenes desde IndexedDB
-        function loadImagesLocal() {
-            const transaction = db.transaction(['images'], 'readonly');
-            const objectStore = transaction.objectStore('images');
-            const request = objectStore.getAll();
-
-            request.onsuccess = function(event) {
-                const images = event.target.result;
-                updateGalleryLocal(images);
-            };
-        }
-
-        // Actualizar galería local
-        function updateGalleryLocal(images) {
+        // Actualizar galería
+        function updateGallery() {
             const gallery = document.getElementById('gallery');
             gallery.innerHTML = '';
 
@@ -188,10 +113,7 @@
                 document.getElementById('placeholder-text').style.display = 'none';
             }
 
-            images.forEach((imageObj) => {
-                const imageSrc = imageObj.data;
-                const id = imageObj.id;
-
+            images.forEach((imageSrc, index) => {
                 const div = document.createElement('div');
                 div.classList.add('relative', 'group');
 
@@ -205,7 +127,9 @@
                 deleteBtn.setAttribute('aria-label', 'Eliminar imagen');
                 deleteBtn.classList.add('absolute', 'top-2', 'right-2', 'bg-red-500', 'text-white', 'rounded-full', 'w-8', 'h-8', 'flex', 'items-center', 'justify-center', 'opacity-0', 'group-hover:opacity-100', 'transition');
                 deleteBtn.onclick = () => {
-                    deleteImageLocal(id);
+                    images.splice(index, 1);
+                    saveImages();
+                    updateGallery();
                 };
 
                 // Botón de sustituir
@@ -222,7 +146,9 @@
                         const reader = new FileReader();
                         reader.readAsDataURL(file);
                         reader.onload = function(event) {
-                            replaceImageLocal(id, event.target.result);
+                            images[index] = event.target.result;
+                            saveImages();
+                            updateGallery();
                         };
                         reader.onerror = function(error) {
                             console.error('Error al leer el archivo:', error);
@@ -239,159 +165,14 @@
             });
         }
 
-        // Eliminar imagen de IndexedDB
-        function deleteImageLocal(id) {
-            const transaction = db.transaction(['images'], 'readwrite');
-            const objectStore = transaction.objectStore('images');
-            const request = objectStore.delete(id);
-
-            request.onsuccess = function(event) {
-                loadImagesLocal();
-            };
-
-            request.onerror = function(event) {
-                console.error('Error al eliminar la imagen:', event.target.errorCode);
-            };
-        }
-
-        // Reemplazar imagen en IndexedDB
-        function replaceImageLocal(id, imageDataUrl) {
-            const transaction = db.transaction(['images'], 'readwrite');
-            const objectStore = transaction.objectStore('images');
-            const request = objectStore.put({ id: id, data: imageDataUrl });
-
-            request.onsuccess = function(event) {
-                loadImagesLocal();
-            };
-
-            request.onerror = function(event) {
-                console.error('Error al reemplazar la imagen:', event.target.errorCode);
-            };
-        }
-
-        /*** Modo Online ***/
-        // Subir archivo a Firebase Storage
-        function uploadFileOnline(file) {
-            const storageRef = storage.ref('images/' + file.name);
-            const uploadTask = storageRef.put(file);
-
-            uploadTask.on('state_changed',
-                (snapshot) => {
-                    // Progreso de la carga (opcional)
-                },
-                (error) => {
-                    console.error('Error al cargar el archivo:', error);
-                    alert('Se produjo un error al cargar la imagen.');
-                },
-                () => {
-                    // Carga exitosa
-                    uploadTask.snapshot.ref.getDownloadURL().then((downloadURL) => {
-                        saveImageDataOnline(file.name, downloadURL);
-                    });
-                }
-            );
-        }
-
-        // Guardar datos de la imagen en Firebase Database
-        function saveImageDataOnline(fileName, downloadURL) {
-            const imageData = {
-                name: fileName,
-                url: downloadURL
-            };
-            const newImageKey = database.ref().child('images').push().key;
-            const updates = {};
-            updates['/images/' + newImageKey] = imageData;
-            database.ref().update(updates).then(() => {
-                loadImagesOnline();
-            });
-        }
-
-        // Cargar imágenes desde Firebase Database
-        function loadImagesOnline() {
-            database.ref('images/').once('value').then((snapshot) => {
-                const images = [];
-                snapshot.forEach((childSnapshot) => {
-                    const imageData = childSnapshot.val();
-                    imageData.key = childSnapshot.key;
-                    images.push(imageData);
-                });
-                updateGalleryOnline(images);
-            });
-        }
-
-        // Actualizar galería en línea
-        function updateGalleryOnline(images) {
-            const gallery = document.getElementById('gallery');
-            gallery.innerHTML = '';
-
-            if (images.length === 0) {
-                document.getElementById('placeholder-text').style.display = 'block';
-            } else {
-                document.getElementById('placeholder-text').style.display = 'none';
+        // Guardar imágenes en LocalStorage
+        function saveImages() {
+            try {
+                localStorage.setItem('images', JSON.stringify(images));
+            } catch (e) {
+                console.error('Error al guardar en LocalStorage:', e);
+                alert('No se pudieron guardar las imágenes. Puede que hayas excedido el límite de almacenamiento.');
             }
-
-            images.forEach((imageData) => {
-                const imageSrc = imageData.url;
-                const key = imageData.key;
-
-                const div = document.createElement('div');
-                div.classList.add('relative', 'group');
-
-                const img = document.createElement('img');
-                img.src = imageSrc;
-                img.classList.add('w-full', 'h-auto', 'rounded-lg');
-
-                // Botón de eliminar
-                const deleteBtn = document.createElement('button');
-                deleteBtn.innerHTML = '✕';
-                deleteBtn.setAttribute('aria-label', 'Eliminar imagen');
-                deleteBtn.classList.add('absolute', 'top-2', 'right-2', 'bg-red-500', 'text-white', 'rounded-full', 'w-8', 'h-8', 'flex', 'items-center', 'justify-center', 'opacity-0', 'group-hover:opacity-100', 'transition');
-                deleteBtn.onclick = () => {
-                    deleteImageOnline(key, imageData.name);
-                };
-
-                // Botón de sustituir
-                const replaceBtn = document.createElement('button');
-                replaceBtn.innerHTML = '⟳';
-                replaceBtn.setAttribute('aria-label', 'Sustituir imagen');
-                replaceBtn.classList.add('absolute', 'top-2', 'left-2', 'bg-yellow-500', 'text-white', 'rounded-full', 'w-8', 'h-8', 'flex', 'items-center', 'justify-center', 'opacity-0', 'group-hover:opacity-100', 'transition');
-                replaceBtn.onclick = () => {
-                    const fileInput = document.createElement('input');
-                    fileInput.type = 'file';
-                    fileInput.accept = 'image/*';
-                    fileInput.onchange = () => {
-                        const file = fileInput.files[0];
-                        replaceImageOnline(key, imageData.name, file);
-                    };
-                    fileInput.click();
-                };
-
-                div.appendChild(img);
-                div.appendChild(deleteBtn);
-                div.appendChild(replaceBtn);
-                gallery.appendChild(div);
-            });
-        }
-
-        // Eliminar imagen de Firebase
-        function deleteImageOnline(key, fileName) {
-            // Eliminar de Firebase Storage
-            const storageRef = storage.ref('images/' + fileName);
-            storageRef.delete().then(() => {
-                // Eliminar de Firebase Database
-                database.ref('images/' + key).remove().then(() => {
-                    loadImagesOnline();
-                });
-            }).catch((error) => {
-                console.error('Error al eliminar la imagen:', error);
-                alert('No se pudo eliminar la imagen.');
-            });
-        }
-
-        // Reemplazar imagen en Firebase
-        function replaceImageOnline(key, oldFileName, newFile) {
-            deleteImageOnline(key, oldFileName);
-            uploadFileOnline(newFile);
         }
     </script>
 </body>
