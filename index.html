@@ -1,150 +1,90 @@
 <!DOCTYPE html>
-<html lang="es">
+<html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Visor de Imágenes</title>
-  <!-- Tailwind CSS desde CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    /* Estilos adicionales para asegurar que el overlay funcione correctamente */
-    .group:hover .group-hover\:opacity-100 {
-      opacity: 1;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Analyzer with Persistent Storage</title>
 </head>
-<body class="bg-gray-100 min-h-screen flex flex-col items-center">
+<body>
+    <h2>Cargar Imágenes</h2>
+    <input type="file" id="imageUpload" multiple>
+    <div id="imageData"></div>
 
-  <!-- Instrucciones -->
-  <header class="bg-white shadow w-full">
-    <div class="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-      <h1 class="text-3xl font-bold text-gray-900">Visor de Imágenes</h1>
-      <p class="mt-2 text-gray-600">Arrastra y suelta imágenes en el recuadro o haz doble clic para seleccionar archivos. Las imágenes permanecerán guardadas incluso si cierras y vuelves a abrir la aplicación. Para abrir y usar la aplicación, simplemente haz doble clic en el archivo HTML.</p>
-    </div>
-  </header>
+    <script>
+        // Cargar imágenes desde localStorage al iniciar la página
+        window.onload = function() {
+            const storedImages = JSON.parse(localStorage.getItem('images')) || [];
+            const imageDataContainer = document.getElementById('imageData');
+            storedImages.forEach(({ name, src, width, height, color, size }) => {
+                const infoDiv = document.createElement('div');
+                infoDiv.innerHTML = `
+                    <img src="${src}" alt="${name}" width="100">
+                    <p>Image: ${name}</p>
+                    <p>Dimensions: ${width} x ${height}</p>
+                    <p>Average Color: ${color}</p>
+                    <p>Size: ${size} KB</p>
+                `;
+                imageDataContainer.appendChild(infoDiv);
+            });
+        };
 
-  <!-- Zona de arrastre y previsualización -->
-  <main class="flex-1 w-full max-w-7xl mx-auto p-4">
-    <!-- Zona de arrastre -->
-    <div id="drop-zone" class="flex items-center justify-center border-4 border-dashed border-gray-300 bg-white rounded-lg h-64 cursor-pointer relative"
-         ondblclick="document.getElementById('file-input').click();"
-         ondragover="event.preventDefault();"
-         ondrop="handleDrop(event);">
-      <input id="file-input" type="file" accept="image/*" multiple class="hidden" onchange="handleFiles(this.files);">
-      <div id="placeholder" class="text-center">
-        <!-- Placeholder SVG icon -->
-        <svg xmlns="http://www.w3.org/2000/svg" class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
-        </svg>
-        <p class="mt-1 text-sm text-gray-600">Arrastra y suelta imágenes aquí o haz doble clic para seleccionar archivos.</p>
-      </div>
-    </div>
+        document.getElementById('imageUpload').addEventListener('change', function(event) {
+            const files = event.target.files;
+            const imageDataContainer = document.getElementById('imageData');
+            imageDataContainer.innerHTML = '';
 
-    <!-- Galería de imágenes -->
-    <div id="gallery" class="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
-  </main>
+            const storedImages = [];
 
-  <!-- Scripts -->
-  <script>
-    // Función para manejar el arrastre y suelta de archivos
-    function handleDrop(event) {
-      event.preventDefault();
-      const files = event.dataTransfer.files;
-      handleFiles(files);
-    }
+            Array.from(files).forEach(file => {
+                const img = new Image();
+                img.src = URL.createObjectURL(file);
 
-    // Función para procesar los archivos seleccionados
-    function handleFiles(files) {
-      for (let file of files) {
-        if (file.type.startsWith('image/')) {
-          const reader = new FileReader();
-          reader.onload = function(e) {
-            saveImage(e.target.result);
-            displayImages();
-          };
-          reader.readAsDataURL(file);
-        }
-      }
-    }
+                img.onload = () => {
+                    const canvas = document.createElement('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
 
-    // Función para guardar la imagen en localStorage
-    function saveImage(dataURL) {
-      let images = JSON.parse(localStorage.getItem('images')) || [];
-      images.push(dataURL);
-      localStorage.setItem('images', JSON.stringify(images));
-    }
+                    const imageData = ctx.getImageData(0, 0, img.width, img.height).data;
+                    let r = 0, g = 0, b = 0, totalPixels = img.width * img.height;
 
-    // Función para mostrar las imágenes guardadas
-    function displayImages() {
-      const gallery = document.getElementById('gallery');
-      gallery.innerHTML = '';
-      let images = JSON.parse(localStorage.getItem('images')) || [];
-      if (images.length === 0) {
-        document.getElementById('placeholder').style.display = 'block';
-      } else {
-        document.getElementById('placeholder').style.display = 'none';
-      }
-      images.forEach((dataURL, index) => {
-        const imageWrapper = document.createElement('div');
-        imageWrapper.className = 'relative group';
-        const img = document.createElement('img');
-        img.src = dataURL;
-        img.className = 'object-cover w-full h-48 rounded-lg shadow';
+                    for (let i = 0; i < imageData.length; i += 4) {
+                        r += imageData[i];
+                        g += imageData[i + 1];
+                        b += imageData[i + 2];
+                    }
 
-        const overlay = document.createElement('div');
-        overlay.className = 'absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 flex items-center justify-center space-x-4 rounded-lg transition-opacity';
+                    r = Math.round(r / totalPixels);
+                    g = Math.round(g / totalPixels);
+                    b = Math.round(b / totalPixels);
 
-        const replaceBtn = document.createElement('button');
-        replaceBtn.innerHTML = '📝';
-        replaceBtn.className = 'text-white text-2xl';
-        replaceBtn.onclick = () => replaceImage(index);
+                    const color = `rgb(${r}, ${g}, ${b})`;
+                    const size = (file.size / 1024).toFixed(2);
 
-        const deleteBtn = document.createElement('button');
-        deleteBtn.innerHTML = '🗑️';
-        deleteBtn.className = 'text-white text-2xl';
-        deleteBtn.onclick = () => deleteImage(index);
+                    const infoDiv = document.createElement('div');
+                    infoDiv.innerHTML = `
+                        <img src="${img.src}" alt="${file.name}" width="100">
+                        <p>Image: ${file.name}</p>
+                        <p>Dimensions: ${img.width} x ${img.height}</p>
+                        <p>Average Color: ${color}</p>
+                        <p>Size: ${size} KB</p>
+                    `;
+                    imageDataContainer.appendChild(infoDiv);
 
-        overlay.appendChild(replaceBtn);
-        overlay.appendChild(deleteBtn);
-        imageWrapper.appendChild(img);
-        imageWrapper.appendChild(overlay);
-        gallery.appendChild(imageWrapper);
-      });
-    }
-
-    // Función para reemplazar una imagen
-    function replaceImage(index) {
-      const fileInput = document.createElement('input');
-      fileInput.type = 'file';
-      fileInput.accept = 'image/*';
-      fileInput.onchange = function() {
-        const file = fileInput.files[0];
-        if (file && file.type.startsWith('image/')) {
-          const reader = new FileReader();
-          reader.onload = function(e) {
-            let images = JSON.parse(localStorage.getItem('images')) || [];
-            images[index] = e.target.result;
-            localStorage.setItem('images', JSON.stringify(images));
-            displayImages();
-          };
-          reader.readAsDataURL(file);
-        }
-      };
-      fileInput.click();
-    }
-
-    // Función para eliminar una imagen
-    function deleteImage(index) {
-      let images = JSON.parse(localStorage.getItem('images')) || [];
-      images.splice(index, 1);
-      localStorage.setItem('images', JSON.stringify(images));
-      displayImages();
-    }
-
-    // Inicializar la galería al cargar la página
-    window.onload = function() {
-      displayImages();
-    };
-  </script>
-
+                    // Guardar imagen en `localStorage`
+                    storedImages.push({
+                        name: file.name,
+                        src: img.src,
+                        width: img.width,
+                        height: img.height,
+                        color: color,
+                        size: size
+                    });
+                    localStorage.setItem('images', JSON.stringify(storedImages));
+                };
+            });
+        });
+    </script>
 </body>
 </html>
