@@ -45,28 +45,6 @@
 
   <!-- Scripts -->
   <script>
-    // Variables globales
-    let db;
-
-    // Abrir conexión con IndexedDB
-    function openDB() {
-      const request = indexedDB.open('imageDB', 1);
-
-      request.onupgradeneeded = function(event) {
-        db = event.target.result;
-        const objectStore = db.createObjectStore('images', { keyPath: 'id', autoIncrement: true });
-      };
-
-      request.onsuccess = function(event) {
-        db = event.target.result;
-        displayImages();
-      };
-
-      request.onerror = function(event) {
-        console.error('Error al abrir IndexedDB:', event.target.errorCode);
-      };
-    }
-
     // Función para manejar el arrastre y suelta de archivos
     function handleDrop(event) {
       event.preventDefault();
@@ -78,78 +56,58 @@
     function handleFiles(files) {
       for (let file of files) {
         if (file.type.startsWith('image/')) {
-          saveImage(file);
+          const reader = new FileReader();
+          reader.onload = function(e) {
+            saveImage(e.target.result);
+            displayImages();
+          };
+          reader.readAsDataURL(file);
         }
       }
     }
 
-    // Función para guardar la imagen en IndexedDB
-    function saveImage(file) {
-      const transaction = db.transaction(['images'], 'readwrite');
-      const objectStore = transaction.objectStore('images');
-      const request = objectStore.add({ file: file });
-
-      request.onsuccess = function() {
-        // Guardar referencia en localStorage
-        let imageIds = JSON.parse(localStorage.getItem('imageIds')) || [];
-        imageIds.push(request.result);
-        localStorage.setItem('imageIds', JSON.stringify(imageIds));
-        displayImages();
-      };
-
-      request.onerror = function(event) {
-        console.error('Error al guardar la imagen:', event.target.errorCode);
-      };
+    // Función para guardar la imagen en localStorage
+    function saveImage(dataURL) {
+      let images = JSON.parse(localStorage.getItem('images')) || [];
+      images.push(dataURL);
+      localStorage.setItem('images', JSON.stringify(images));
     }
 
     // Función para mostrar las imágenes guardadas
     function displayImages() {
       const gallery = document.getElementById('gallery');
       gallery.innerHTML = '';
-      let imageIds = JSON.parse(localStorage.getItem('imageIds')) || [];
-      if (imageIds.length === 0) {
+      let images = JSON.parse(localStorage.getItem('images')) || [];
+      if (images.length === 0) {
         document.getElementById('placeholder').style.display = 'block';
       } else {
         document.getElementById('placeholder').style.display = 'none';
       }
+      images.forEach((dataURL, index) => {
+        const imageWrapper = document.createElement('div');
+        imageWrapper.className = 'relative group';
+        const img = document.createElement('img');
+        img.src = dataURL;
+        img.className = 'object-cover w-full h-48 rounded-lg shadow';
 
-      imageIds.forEach((id, index) => {
-        const transaction = db.transaction(['images'], 'readonly');
-        const objectStore = transaction.objectStore('images');
-        const request = objectStore.get(id);
+        const overlay = document.createElement('div');
+        overlay.className = 'absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 flex items-center justify-center space-x-4 rounded-lg transition-opacity';
 
-        request.onsuccess = function(event) {
-          const record = event.target.result;
-          if (record) {
-            const file = record.file;
-            const imageURL = URL.createObjectURL(file);
+        const replaceBtn = document.createElement('button');
+        replaceBtn.innerHTML = '📝';
+        replaceBtn.className = 'text-white text-2xl';
+        replaceBtn.onclick = () => replaceImage(index);
 
-            const imageWrapper = document.createElement('div');
-            imageWrapper.className = 'relative group';
-            const img = document.createElement('img');
-            img.src = imageURL;
-            img.className = 'object-cover w-full h-48 rounded-lg shadow';
+        const deleteBtn = document.createElement('button');
+        deleteBtn.innerHTML = '🗑️';
+        deleteBtn.className = 'text-white text-2xl';
+        deleteBtn.onclick = () => deleteImage(index);
 
-            const overlay = document.createElement('div');
-            overlay.className = 'absolute inset-0 bg-black bg-opacity-50 opacity-0 group-hover:opacity-100 flex items-center justify-center space-x-4 rounded-lg transition-opacity';
-
-            const replaceBtn = document.createElement('button');
-            replaceBtn.innerHTML = '📝';
-            replaceBtn.className = 'text-white text-2xl';
-            replaceBtn.onclick = () => replaceImage(index);
-
-            const deleteBtn = document.createElement('button');
-            deleteBtn.innerHTML = '🗑️';
-            deleteBtn.className = 'text-white text-2xl';
-            deleteBtn.onclick = () => deleteImage(index);
-
-            overlay.appendChild(replaceBtn);
-            overlay.appendChild(deleteBtn);
-            imageWrapper.appendChild(img);
-            imageWrapper.appendChild(overlay);
-            gallery.appendChild(imageWrapper);
-          }
-        };
+        overlay.appendChild(replaceBtn);
+        overlay.appendChild(deleteBtn);
+        imageWrapper.appendChild(img);
+        imageWrapper.appendChild(overlay);
+        gallery.appendChild(imageWrapper);
       });
     }
 
@@ -161,21 +119,14 @@
       fileInput.onchange = function() {
         const file = fileInput.files[0];
         if (file && file.type.startsWith('image/')) {
-          const imageIds = JSON.parse(localStorage.getItem('imageIds')) || [];
-          const id = imageIds[index];
-
-          // Actualizar imagen en IndexedDB
-          const transaction = db.transaction(['images'], 'readwrite');
-          const objectStore = transaction.objectStore('images');
-          const request = objectStore.put({ id: id, file: file });
-
-          request.onsuccess = function() {
+          const reader = new FileReader();
+          reader.onload = function(e) {
+            let images = JSON.parse(localStorage.getItem('images')) || [];
+            images[index] = e.target.result;
+            localStorage.setItem('images', JSON.stringify(images));
             displayImages();
           };
-
-          request.onerror = function(event) {
-            console.error('Error al reemplazar la imagen:', event.target.errorCode);
-          };
+          reader.readAsDataURL(file);
         }
       };
       fileInput.click();
@@ -183,29 +134,15 @@
 
     // Función para eliminar una imagen
     function deleteImage(index) {
-      const imageIds = JSON.parse(localStorage.getItem('imageIds')) || [];
-      const id = imageIds[index];
-
-      // Eliminar imagen de IndexedDB
-      const transaction = db.transaction(['images'], 'readwrite');
-      const objectStore = transaction.objectStore('images');
-      const request = objectStore.delete(id);
-
-      request.onsuccess = function() {
-        // Actualizar localStorage
-        imageIds.splice(index, 1);
-        localStorage.setItem('imageIds', JSON.stringify(imageIds));
-        displayImages();
-      };
-
-      request.onerror = function(event) {
-        console.error('Error al eliminar la imagen:', event.target.errorCode);
-      };
+      let images = JSON.parse(localStorage.getItem('images')) || [];
+      images.splice(index, 1);
+      localStorage.setItem('images', JSON.stringify(images));
+      displayImages();
     }
 
-    // Inicializar la base de datos y la galería al cargar la página
+    // Inicializar la galería al cargar la página
     window.onload = function() {
-      openDB();
+      displayImages();
     };
   </script>
 
