@@ -1,90 +1,611 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Image Analyzer with Persistent Storage</title>
+    <title>Previsualizador de Imágenes Inteligente</title>
+    <!-- Cargar Tailwind CSS desde un CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Cargar TensorFlow.js y el modelo Coco SSD desde archivos locales -->
+    <!-- Para soporte offline, los scripts están incrustados en el archivo HTML -->
+    <!-- Nota: Incluir bibliotecas tan grandes en un solo archivo no es recomendable para producción -->
 </head>
-<body>
-    <h2>Cargar Imágenes</h2>
-    <input type="file" id="imageUpload" multiple>
-    <div id="imageData"></div>
+<body class="bg-gray-100">
+
+    <!-- Contenedor principal -->
+    <div class="container mx-auto p-4">
+
+        <!-- Título y botones -->
+        <div class="flex justify-between items-center mb-4">
+            <h1 class="text-2xl font-bold">Previsualizador de Imágenes Inteligente</h1>
+            <div>
+                <button id="toggle-analysis" class="bg-blue-500 text-white px-4 py-2 rounded mr-2">Ver Análisis</button>
+                <button id="clear-data" class="bg-red-500 text-white px-4 py-2 rounded">Borrar Datos</button>
+            </div>
+        </div>
+
+        <!-- Sección de análisis -->
+        <div id="analysis-section" class="hidden mb-4 p-4 bg-white rounded shadow">
+            <!-- Aquí se mostrarán los resultados del análisis -->
+        </div>
+
+        <!-- Placeholder inicial -->
+        <div id="placeholder" class="text-center text-gray-500 mt-8">
+            <p>No hay imágenes cargadas. ¡Empieza a agregar tus imágenes!</p>
+        </div>
+
+        <!-- Área de carga de imágenes -->
+        <div id="drop-area" class="w-full h-64 flex flex-col items-center justify-center border-4 border-dashed border-gray-300 bg-white rounded cursor-pointer mt-4" role="button" aria-label="Área para cargar imágenes">
+            <p class="text-gray-500">Arrastra y suelta imágenes aquí o haz doble clic para seleccionar</p>
+            <input type="file" id="fileElem" multiple accept="image/*" class="hidden">
+        </div>
+
+        <!-- Galería de imágenes -->
+        <div id="gallery" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mt-4">
+            <!-- Las imágenes cargadas aparecerán aquí -->
+        </div>
+
+        <!-- Indicador de carga -->
+        <div id="loading-indicator" class="hidden fixed inset-0 bg-gray-900 bg-opacity-50 flex items-center justify-center">
+            <div class="bg-white p-4 rounded shadow">
+                <p class="text-gray-700">Cargando modelos y procesando imágenes...</p>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Scripts -->
+    <!-- Incluimos TensorFlow.js y el modelo Coco SSD desde CDNs -->
+    <!-- Para una aplicación offline completa, se necesitaría empaquetar estas librerías localmente, lo cual puede aumentar significativamente el tamaño del archivo -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@3.20.0/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.2/dist/coco-ssd.min.js"></script>
 
     <script>
-        // Cargar imágenes desde localStorage al iniciar la página
-        window.onload = function() {
-            const storedImages = JSON.parse(localStorage.getItem('images')) || [];
-            const imageDataContainer = document.getElementById('imageData');
-            storedImages.forEach(({ name, src, width, height, color, size }) => {
-                const infoDiv = document.createElement('div');
-                infoDiv.innerHTML = `
-                    <img src="${src}" alt="${name}" width="100">
-                    <p>Image: ${name}</p>
-                    <p>Dimensions: ${width} x ${height}</p>
-                    <p>Average Color: ${color}</p>
-                    <p>Size: ${size} KB</p>
-                `;
-                imageDataContainer.appendChild(infoDiv);
-            });
+        // Verificar soporte de APIs
+        if (!window.indexedDB) {
+            alert('Tu navegador no soporta IndexedDB. Por favor, utiliza un navegador más actualizado.');
+        }
+
+        // Variables globales y elementos del DOM
+        let db;
+        let model;
+        let imagesLoaded = 0;
+        const dropArea = document.getElementById('drop-area');
+        const gallery = document.getElementById('gallery');
+        const placeholder = document.getElementById('placeholder');
+        const toggleAnalysisBtn = document.getElementById('toggle-analysis');
+        const clearDataBtn = document.getElementById('clear-data');
+        const analysisSection = document.getElementById('analysis-section');
+        const fileElem = document.getElementById('fileElem');
+        const loadingIndicator = document.getElementById('loading-indicator');
+
+        // Datos de análisis globales
+        let analysisData = {
+            totalImages: 0,
+            categories: {},
+            models: {},
+            orientation: {},
+            key: {}
         };
 
-        document.getElementById('imageUpload').addEventListener('change', function(event) {
-            const files = event.target.files;
-            const imageDataContainer = document.getElementById('imageData');
-            imageDataContainer.innerHTML = '';
+        // Cargar el modelo de detección de objetos
+        async function loadModel() {
+            try {
+                showLoadingIndicator();
+                model = await cocoSsd.load();
+                hideLoadingIndicator();
+            } catch (error) {
+                console.error('Error al cargar el modelo:', error);
+                alert('Hubo un error al cargar el modelo de análisis. Por favor, recarga la página.');
+            }
+        }
 
-            const storedImages = [];
+        // Mostrar indicador de carga
+        function showLoadingIndicator() {
+            loadingIndicator.classList.remove('hidden');
+        }
 
-            Array.from(files).forEach(file => {
-                const img = new Image();
-                img.src = URL.createObjectURL(file);
+        // Ocultar indicador de carga
+        function hideLoadingIndicator() {
+            loadingIndicator.classList.add('hidden');
+        }
 
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    canvas.width = img.width;
-                    canvas.height = img.height;
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0);
+        // Inicializar la aplicación
+        function init() {
+            // Abrir IndexedDB
+            let request = indexedDB.open('ImageDB', 1);
 
-                    const imageData = ctx.getImageData(0, 0, img.width, img.height).data;
-                    let r = 0, g = 0, b = 0, totalPixels = img.width * img.height;
+            request.onupgradeneeded = function(event) {
+                db = event.target.result;
+                db.createObjectStore('images', { keyPath: 'id' });
+            };
 
-                    for (let i = 0; i < imageData.length; i += 4) {
-                        r += imageData[i];
-                        g += imageData[i + 1];
-                        b += imageData[i + 2];
-                    }
+            request.onsuccess = function(event) {
+                db = event.target.result;
+                loadImages();
+            };
 
-                    r = Math.round(r / totalPixels);
-                    g = Math.round(g / totalPixels);
-                    b = Math.round(b / totalPixels);
+            request.onerror = function(event) {
+                console.error('Error al abrir IndexedDB:', event);
+            };
 
-                    const color = `rgb(${r}, ${g}, ${b})`;
-                    const size = (file.size / 1024).toFixed(2);
+            // Cargar el modelo
+            loadModel();
 
-                    const infoDiv = document.createElement('div');
-                    infoDiv.innerHTML = `
-                        <img src="${img.src}" alt="${file.name}" width="100">
-                        <p>Image: ${file.name}</p>
-                        <p>Dimensions: ${img.width} x ${img.height}</p>
-                        <p>Average Color: ${color}</p>
-                        <p>Size: ${size} KB</p>
-                    `;
-                    imageDataContainer.appendChild(infoDiv);
+            // Configurar eventos
+            setupEventListeners();
+        }
 
-                    // Guardar imagen en `localStorage`
-                    storedImages.push({
-                        name: file.name,
-                        src: img.src,
-                        width: img.width,
-                        height: img.height,
-                        color: color,
-                        size: size
-                    });
-                    localStorage.setItem('images', JSON.stringify(storedImages));
-                };
+        // Configurar eventos
+        function setupEventListeners() {
+            // Manejo de arrastrar y soltar
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropArea.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropArea.classList.add('border-blue-500');
+                }, false);
             });
-        });
+
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropArea.addEventListener(eventName, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    dropArea.classList.remove('border-blue-500');
+                }, false);
+            });
+
+            dropArea.addEventListener('drop', (e) => {
+                let files = e.dataTransfer.files;
+                handleFiles(files);
+            });
+
+            // Manejo de doble clic para cargar imágenes
+            dropArea.addEventListener('dblclick', () => {
+                fileElem.click();
+            });
+
+            fileElem.addEventListener('change', (e) => {
+                let files = e.target.files;
+                handleFiles(files);
+                fileElem.value = ''; // Resetear el input
+            });
+
+            // Botón para mostrar/ocultar análisis
+            toggleAnalysisBtn.addEventListener('click', () => {
+                analysisSection.classList.toggle('hidden');
+                if (!analysisSection.classList.contains('hidden')) {
+                    updateAnalysis();
+                }
+            });
+
+            // Botón para borrar todos los datos
+            clearDataBtn.addEventListener('click', () => {
+                if (confirm('¿Estás seguro de que deseas borrar todos los datos? Esta acción no se puede deshacer.')) {
+                    clearAllData();
+                }
+            });
+        }
+
+        // Manejar archivos cargados
+        function handleFiles(files) {
+            files = [...files]; // Convertir a array
+
+            if (files.length === 0) {
+                return;
+            }
+
+            // Validar tipos de archivo
+            files = files.filter(file => {
+                if (!file.type.startsWith('image/')) {
+                    alert(`El archivo ${file.name} no es una imagen válida.`);
+                    return false;
+                }
+                return true;
+            });
+
+            // Limitar el tamaño de los archivos (5MB por ejemplo)
+            files = files.filter(file => {
+                if (file.size > 5 * 1024 * 1024) {
+                    alert(`El archivo ${file.name} es demasiado grande. Tamaño máximo permitido: 5MB.`);
+                    return false;
+                }
+                return true;
+            });
+
+            // Mostrar indicador de carga
+            showLoadingIndicator();
+
+            // Procesar cada archivo
+            files.forEach(file => {
+                let reader = new FileReader();
+                reader.onload = (e) => {
+                    let imageData = {
+                        id: Date.now() + Math.random(),
+                        src: e.target.result,
+                        analysis: {}
+                    };
+                    displayImage(imageData);
+                    saveImage(imageData);
+                };
+                reader.onerror = (error) => {
+                    console.error('Error al leer el archivo:', error);
+                    alert('Hubo un error al leer el archivo.');
+                };
+                reader.readAsDataURL(file);
+            });
+
+            // Ocultar placeholder
+            placeholder.classList.add('hidden');
+        }
+
+        // Guardar imagen en IndexedDB
+        function saveImage(imageData) {
+            let transaction = db.transaction(['images'], 'readwrite');
+            let store = transaction.objectStore('images');
+            let request = store.add(imageData);
+            request.onsuccess = function() {
+                console.log('Imagen guardada');
+            };
+            request.onerror = function() {
+                console.error('Error al guardar la imagen');
+            };
+        }
+
+        // Mostrar imagen en la galería
+        function displayImage(imageData) {
+            let imgContainer = document.createElement('div');
+            imgContainer.classList.add('relative');
+
+            let img = document.createElement('img');
+            img.src = imageData.src;
+            img.alt = 'Imagen cargada por el usuario';
+            img.classList.add('w-full', 'h-auto', 'rounded');
+
+            img.onload = () => {
+                imagesLoaded++;
+                if (model) {
+                    analyzeImage(img, imageData);
+                } else {
+                    console.warn('El modelo aún no se ha cargado.');
+                }
+            };
+
+            img.onerror = (error) => {
+                console.error('Error al cargar la imagen:', error);
+                alert('Hubo un error al cargar la imagen.');
+            };
+
+            // Botones de eliminar y sustituir
+            let deleteBtn = document.createElement('button');
+            deleteBtn.innerHTML = '✕';
+            deleteBtn.title = 'Eliminar imagen';
+            deleteBtn.classList.add('absolute', 'top-2', 'right-2', 'bg-red-500', 'text-white', 'rounded-full', 'w-6', 'h-6', 'flex', 'items-center', 'justify-center');
+            deleteBtn.addEventListener('click', () => {
+                if (confirm('¿Estás seguro de que deseas eliminar esta imagen?')) {
+                    deleteImage(imageData.id);
+                    imgContainer.remove();
+                    subtractAnalysisData(imageData.analysis);
+                    updateAnalysis();
+                    if (gallery.children.length === 0) {
+                        placeholder.classList.remove('hidden');
+                    }
+                }
+            });
+
+            let replaceBtn = document.createElement('button');
+            replaceBtn.innerHTML = '⟳';
+            replaceBtn.title = 'Sustituir imagen';
+            replaceBtn.classList.add('absolute', 'top-2', 'right-10', 'bg-yellow-500', 'text-white', 'rounded-full', 'w-6', 'h-6', 'flex', 'items-center', 'justify-center');
+            replaceBtn.addEventListener('click', () => {
+                let input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.onchange = (e) => {
+                    let file = e.target.files[0];
+                    if (file.size > 5 * 1024 * 1024) {
+                        alert(`El archivo ${file.name} es demasiado grande. Tamaño máximo permitido: 5MB.`);
+                        return;
+                    }
+                    let reader = new FileReader();
+                    reader.onload = (e) => {
+                        // Restar los datos de análisis anteriores
+                        subtractAnalysisData(imageData.analysis);
+
+                        imageData.src = e.target.result;
+                        imageData.analysis = {};
+                        updateImage(imageData);
+                        img.src = imageData.src;
+                        img.onload = () => {
+                            analyzeImage(img, imageData);
+                        };
+                    };
+                    reader.onerror = (error) => {
+                        console.error('Error al leer el archivo:', error);
+                        alert('Hubo un error al leer el archivo.');
+                    };
+                    reader.readAsDataURL(file);
+                };
+                input.click();
+            });
+
+            imgContainer.appendChild(img);
+            imgContainer.appendChild(deleteBtn);
+            imgContainer.appendChild(replaceBtn);
+            gallery.appendChild(imgContainer);
+        }
+
+        // Analizar imagen
+        async function analyzeImage(imgElement, imageData) {
+            try {
+                if (!model) {
+                    throw new Error('El modelo no se ha cargado correctamente.');
+                }
+
+                const predictions = await model.detect(imgElement);
+
+                // Filtrar predicciones con confianza superior a un umbral
+                const highConfidencePredictions = predictions.filter(prediction => prediction.score > 0.5);
+
+                // Procesar las predicciones
+                let categories = highConfidencePredictions.map(prediction => prediction.class);
+
+                // Determinar categoría principal
+                let category = 'Otros';
+                if (categories.includes('person')) {
+                    category = 'lifestyle';
+                } else if (categories.includes('car') || categories.includes('bus') || categories.includes('truck')) {
+                    category = 'arquitectura';
+                } else if (categories.includes('bird') || categories.includes('cat') || categories.includes('dog')) {
+                    category = 'vida salvaje';
+                } else if (categories.includes('knife') || categories.includes('fork') || categories.includes('spoon')) {
+                    category = 'comida';
+                } else if (categories.includes('potted plant') || categories.includes('bench') || categories.includes('chair')) {
+                    category = 'interiorismo';
+                } else if (categories.includes('bottle') || categories.includes('cup') || categories.includes('wine glass')) {
+                    category = 'bodegón';
+                } else if (categories.includes('boat') || categories.includes('surfboard')) {
+                    category = 'paisaje';
+                }
+
+                // Contar número de personas
+                let numPersons = highConfidencePredictions.filter(prediction => prediction.class === 'person').length;
+                let modelCount = '';
+                if (numPersons === 1) {
+                    modelCount = 'un modelo';
+                } else if (numPersons === 2) {
+                    modelCount = 'dos modelos';
+                } else if (numPersons > 2) {
+                    modelCount = 'más de dos modelos';
+                }
+
+                // Determinar orientación
+                let orientation = imgElement.naturalWidth >= imgElement.naturalHeight ? 'horizontal' : 'vertical';
+
+                // Análisis de brillo para clave alta o baja
+                let canvas = document.createElement('canvas');
+                canvas.width = imgElement.naturalWidth;
+                canvas.height = imgElement.naturalHeight;
+                let ctx = canvas.getContext('2d');
+                ctx.drawImage(imgElement, 0, 0);
+                let imageDataCanvas = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                let data = imageDataCanvas.data;
+                let colorSum = 0;
+                for (let x = 0, len = data.length; x < len; x += 4) {
+                    let r = data[x];
+                    let g = data[x+1];
+                    let b = data[x+2];
+                    let avg = Math.floor((r + g + b) / 3);
+                    colorSum += avg;
+                }
+                let brightness = colorSum / (imgElement.naturalWidth * imgElement.naturalHeight);
+                let keyType = brightness > 127 ? 'clave alta' : 'clave baja';
+
+                // Guardar los resultados en imageData
+                imageData.analysis = {
+                    category: category,
+                    numPersons: numPersons,
+                    modelCount: modelCount,
+                    orientation: orientation,
+                    keyType: keyType
+                };
+
+                // Actualizar los datos de análisis globales
+                updateAnalysisData(imageData.analysis);
+
+                // Actualizar la imagen en IndexedDB
+                updateImage(imageData);
+
+                // Actualizar el análisis
+                updateAnalysis();
+
+                // Ocultar indicador de carga si todas las imágenes han sido procesadas
+                imagesLoaded--;
+                if (imagesLoaded === 0) {
+                    hideLoadingIndicator();
+                }
+
+            } catch (error) {
+                console.error('Error al analizar la imagen:', error);
+                alert('Hubo un error al analizar la imagen.');
+            }
+        }
+
+        // Actualizar los datos de análisis globales
+        function updateAnalysisData(analysis) {
+            analysisData.totalImages++;
+
+            // Categoría
+            analysisData.categories[analysis.category] = (analysisData.categories[analysis.category] || 0) + 1;
+
+            // Modelos
+            if (analysis.modelCount) {
+                analysisData.models[analysis.modelCount] = (analysisData.models[analysis.modelCount] || 0) + 1;
+            }
+
+            // Orientación
+            analysisData.orientation[analysis.orientation] = (analysisData.orientation[analysis.orientation] || 0) + 1;
+
+            // Clave
+            analysisData.key[analysis.keyType] = (analysisData.key[analysis.keyType] || 0) + 1;
+        }
+
+        // Restar los datos de análisis al eliminar o sustituir una imagen
+        function subtractAnalysisData(analysis) {
+            analysisData.totalImages--;
+
+            // Categoría
+            if (analysis.categories && analysis.categories[analysis.category]) {
+                analysisData.categories[analysis.category]--;
+                if (analysisData.categories[analysis.category] === 0) {
+                    delete analysisData.categories[analysis.category];
+                }
+            }
+
+            // Modelos
+            if (analysis.modelCount && analysisData.models[analysis.modelCount]) {
+                analysisData.models[analysis.modelCount]--;
+                if (analysisData.models[analysis.modelCount] === 0) {
+                    delete analysisData.models[analysis.modelCount];
+                }
+            }
+
+            // Orientación
+            if (analysisData.orientation[analysis.orientation]) {
+                analysisData.orientation[analysis.orientation]--;
+                if (analysisData.orientation[analysis.orientation] === 0) {
+                    delete analysisData.orientation[analysis.orientation];
+                }
+            }
+
+            // Clave
+            if (analysisData.key[analysis.keyType]) {
+                analysisData.key[analysis.keyType]--;
+                if (analysisData.key[analysis.keyType] === 0) {
+                    delete analysisData.key[analysis.keyType];
+                }
+            }
+        }
+
+        // Actualizar análisis y mostrar en la interfaz
+        function updateAnalysis() {
+            let html = `
+                <h2 class="text-xl font-bold mb-2">Resultados del Análisis</h2>
+                <p>Total imágenes analizadas: ${analysisData.totalImages}</p>
+                <p>De ellas:</p>
+                <ul class="list-disc ml-6">
+                    ${Object.entries(analysisData.categories).map(([category, count]) => {
+                        let percentage = ((count / analysisData.totalImages) * 100).toFixed(2);
+                        return `<li>${category}: ${percentage}%</li>`;
+                    }).join('')}
+                </ul>
+                <!-- Más detalles del análisis -->
+                <p class="mt-4">Orientación de las imágenes:</p>
+                <ul class="list-disc ml-6">
+                    ${Object.entries(analysisData.orientation).map(([orientation, count]) => {
+                        let percentage = ((count / analysisData.totalImages) * 100).toFixed(2);
+                        return `<li>${orientation}: ${percentage}%</li>`;
+                    }).join('')}
+                </ul>
+                <p class="mt-4">Clave de las imágenes:</p>
+                <ul class="list-disc ml-6">
+                    ${Object.entries(analysisData.key).map(([key, count]) => {
+                        let percentage = ((count / analysisData.totalImages) * 100).toFixed(2);
+                        return `<li>${key}: ${percentage}%</li>`;
+                    }).join('')}
+                </ul>
+                <!-- Puedes agregar más secciones similares para otros parámetros -->
+            `;
+            analysisSection.innerHTML = html;
+        }
+
+        // Eliminar imagen de IndexedDB
+        function deleteImage(id) {
+            let transaction = db.transaction(['images'], 'readwrite');
+            let store = transaction.objectStore('images');
+            let request = store.delete(id);
+            request.onsuccess = function() {
+                console.log('Imagen eliminada');
+            };
+            request.onerror = function() {
+                console.error('Error al eliminar la imagen');
+            };
+        }
+
+        // Actualizar imagen en IndexedDB
+        function updateImage(imageData) {
+            let transaction = db.transaction(['images'], 'readwrite');
+            let store = transaction.objectStore('images');
+            let request = store.put(imageData);
+            request.onsuccess = function() {
+                console.log('Imagen actualizada');
+            };
+            request.onerror = function() {
+                console.error('Error al actualizar la imagen');
+            };
+        }
+
+        // Cargar imágenes desde IndexedDB
+        function loadImages() {
+            // Reiniciar los datos de análisis
+            analysisData = {
+                totalImages: 0,
+                categories: {},
+                models: {},
+                orientation: {},
+                key: {}
+            };
+
+            let transaction = db.transaction(['images'], 'readonly');
+            let store = transaction.objectStore('images');
+            let request = store.openCursor();
+            request.onsuccess = function(event) {
+                let cursor = event.target.result;
+                if (cursor) {
+                    let imageData = cursor.value;
+                    displayImage(imageData);
+                    // Actualizar los datos de análisis con los datos almacenados
+                    if (imageData.analysis && Object.keys(imageData.analysis).length > 0) {
+                        updateAnalysisData(imageData.analysis);
+                    }
+                    cursor.continue();
+                } else {
+                    // Ocultar placeholder si hay imágenes
+                    if (gallery.children.length > 0) {
+                        placeholder.classList.add('hidden');
+                    }
+                    updateAnalysis();
+                }
+            };
+        }
+
+        // Borrar todos los datos
+        function clearAllData() {
+            let transaction = db.transaction(['images'], 'readwrite');
+            let store = transaction.objectStore('images');
+            let request = store.clear();
+            request.onsuccess = function() {
+                console.log('Todos los datos han sido borrados');
+                // Reiniciar la galería y los datos de análisis
+                gallery.innerHTML = '';
+                analysisData = {
+                    totalImages: 0,
+                    categories: {},
+                    models: {},
+                    orientation: {},
+                    key: {}
+                };
+                updateAnalysis();
+                placeholder.classList.remove('hidden');
+            };
+            request.onerror = function() {
+                console.error('Error al borrar los datos');
+            };
+        }
+
+        // Iniciar la aplicación
+        init();
+
     </script>
+
 </body>
 </html>
