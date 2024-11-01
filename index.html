@@ -38,87 +38,18 @@
     <!-- JavaScript -->
     <script>
         // Variables globales
-        let db;
+        let images = [];
 
-        // Inicializar IndexedDB
-        function initDB() {
-            const request = indexedDB.open('imageDB', 1);
+        // Tu Client ID de Imgur
+        const CLIENT_ID = 'TU_CLIENT_ID';
 
-            request.onupgradeneeded = function(event) {
-                db = event.target.result;
-                db.createObjectStore('images', { keyPath: 'id', autoIncrement: true });
-            };
-
-            request.onsuccess = function(event) {
-                db = event.target.result;
-                loadImages();
-            };
-
-            request.onerror = function(event) {
-                console.error('Error al abrir IndexedDB:', event.target.errorCode);
-            };
-        }
-
-        // Cargar imágenes desde IndexedDB
-        function loadImages() {
-            const transaction = db.transaction(['images'], 'readonly');
-            const objectStore = transaction.objectStore('images');
-            const request = objectStore.getAll();
-
-            request.onsuccess = function(event) {
-                const images = event.target.result;
-                updateGallery(images);
-            };
-        }
-
-        // Guardar imagen en IndexedDB
-        function saveImage(imageDataUrl) {
-            const transaction = db.transaction(['images'], 'readwrite');
-            const objectStore = transaction.objectStore('images');
-            const request = objectStore.add({ data: imageDataUrl });
-
-            request.onsuccess = function(event) {
-                loadImages();
-            };
-
-            request.onerror = function(event) {
-                console.error('Error al guardar la imagen:', event.target.errorCode);
-            };
-        }
-
-        // Eliminar imagen de IndexedDB
-        function deleteImage(id) {
-            const transaction = db.transaction(['images'], 'readwrite');
-            const objectStore = transaction.objectStore('images');
-            const request = objectStore.delete(id);
-
-            request.onsuccess = function(event) {
-                loadImages();
-            };
-
-            request.onerror = function(event) {
-                console.error('Error al eliminar la imagen:', event.target.errorCode);
-            };
-        }
-
-        // Reemplazar imagen en IndexedDB
-        function replaceImage(id, imageDataUrl) {
-            const transaction = db.transaction(['images'], 'readwrite');
-            const objectStore = transaction.objectStore('images');
-            const request = objectStore.put({ id: id, data: imageDataUrl });
-
-            request.onsuccess = function(event) {
-                loadImages();
-            };
-
-            request.onerror = function(event) {
-                console.error('Error al reemplazar la imagen:', event.target.errorCode);
-            };
-        }
-
-        // Asignar eventos al cargar el DOM
+        // Cargar imágenes desde LocalStorage al iniciar
         document.addEventListener('DOMContentLoaded', () => {
-            initDB();
+            // Cargar imágenes desde LocalStorage
+            if (localStorage.getItem('images')) {
+                images = JSON.parse(localStorage.getItem('images'));
+                updateGallery();
+            }
 
             // Elementos del DOM
             const dropArea = document.getElementById('drop-area');
@@ -155,16 +86,44 @@
 
         // Manejar archivos seleccionados
         function handleFiles(files) {
-            [...files].forEach(previewFile);
+            [...files].forEach(uploadImage);
         }
 
-        // Previsualizar y almacenar archivos
-        function previewFile(file) {
+        // Subir imagen a Imgur
+        function uploadImage(file) {
             const reader = new FileReader();
             reader.readAsDataURL(file);
-            reader.onload = function(event) {
-                const imageDataUrl = event.target.result;
-                saveImage(imageDataUrl);
+            reader.onload = function() {
+                const base64Image = reader.result.split(',')[1];
+                const url = 'https://api.imgur.com/3/image';
+
+                fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        Authorization: 'Client-ID ' + CLIENT_ID,
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        image: base64Image,
+                        type: 'base64',
+                    }),
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        const imageUrl = data.data.link;
+                        images.push(imageUrl);
+                        saveImages();
+                        updateGallery();
+                    } else {
+                        console.error('Error al subir la imagen:', data);
+                        alert('Se produjo un error al subir la imagen.');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error al subir la imagen:', error);
+                    alert('Se produjo un error al subir la imagen.');
+                });
             };
             reader.onerror = function(error) {
                 console.error('Error al leer el archivo:', error);
@@ -173,7 +132,7 @@
         }
 
         // Actualizar galería
-        function updateGallery(images) {
+        function updateGallery() {
             const gallery = document.getElementById('gallery');
             gallery.innerHTML = '';
 
@@ -183,10 +142,7 @@
                 document.getElementById('placeholder-text').style.display = 'none';
             }
 
-            images.forEach((imageObj) => {
-                const imageSrc = imageObj.data;
-                const id = imageObj.id;
-
+            images.forEach((imageSrc, index) => {
                 const div = document.createElement('div');
                 div.classList.add('relative', 'group');
 
@@ -200,38 +156,20 @@
                 deleteBtn.setAttribute('aria-label', 'Eliminar imagen');
                 deleteBtn.classList.add('absolute', 'top-2', 'right-2', 'bg-red-500', 'text-white', 'rounded-full', 'w-8', 'h-8', 'flex', 'items-center', 'justify-center', 'opacity-0', 'group-hover:opacity-100', 'transition');
                 deleteBtn.onclick = () => {
-                    deleteImage(id);
-                };
-
-                // Botón de sustituir
-                const replaceBtn = document.createElement('button');
-                replaceBtn.innerHTML = '⟳';
-                replaceBtn.setAttribute('aria-label', 'Sustituir imagen');
-                replaceBtn.classList.add('absolute', 'top-2', 'left-2', 'bg-yellow-500', 'text-white', 'rounded-full', 'w-8', 'h-8', 'flex', 'items-center', 'justify-center', 'opacity-0', 'group-hover:opacity-100', 'transition');
-                replaceBtn.onclick = () => {
-                    const fileInput = document.createElement('input');
-                    fileInput.type = 'file';
-                    fileInput.accept = 'image/*';
-                    fileInput.onchange = () => {
-                        const file = fileInput.files[0];
-                        const reader = new FileReader();
-                        reader.readAsDataURL(file);
-                        reader.onload = function(event) {
-                            replaceImage(id, event.target.result);
-                        };
-                        reader.onerror = function(error) {
-                            console.error('Error al leer el archivo:', error);
-                            alert('Se produjo un error al cargar la imagen.');
-                        };
-                    };
-                    fileInput.click();
+                    images.splice(index, 1);
+                    saveImages();
+                    updateGallery();
                 };
 
                 div.appendChild(img);
                 div.appendChild(deleteBtn);
-                div.appendChild(replaceBtn);
                 gallery.appendChild(div);
             });
+        }
+
+        // Guardar imágenes en LocalStorage
+        function saveImages() {
+            localStorage.setItem('images', JSON.stringify(images));
         }
     </script>
 </body>
