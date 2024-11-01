@@ -5,9 +5,11 @@
     <title>Previsualizador de Imágenes</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        /* Estilos adicionales si es necesario */
-    </style>
+    <!-- Firebase SDKs -->
+    <!-- Importa las librerías de Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col">
 
@@ -37,88 +39,25 @@
 
     <!-- JavaScript -->
     <script>
-        // Variables globales
-        let db;
+        // Configuración de Firebase
+        const firebaseConfig = {
+            apiKey: "TU_API_KEY",
+            authDomain: "TU_AUTH_DOMAIN",
+            projectId: "TU_PROJECT_ID",
+            storageBucket: "TU_STORAGE_BUCKET",
+            messagingSenderId: "TU_MESSAGING_SENDER_ID",
+            appId: "TU_APP_ID",
+            databaseURL: "TU_DATABASE_URL"
+        };
 
-        // Inicializar IndexedDB
-        function initDB() {
-            const request = indexedDB.open('imageDB', 1);
-
-            request.onupgradeneeded = function(event) {
-                db = event.target.result;
-                const objectStore = db.createObjectStore('images', { keyPath: 'id', autoIncrement: true });
-            };
-
-            request.onsuccess = function(event) {
-                db = event.target.result;
-                loadImages();
-            };
-
-            request.onerror = function(event) {
-                console.error('Error al abrir IndexedDB:', event.target.errorCode);
-            };
-        }
-
-        // Cargar imágenes desde IndexedDB
-        function loadImages() {
-            const transaction = db.transaction(['images'], 'readonly');
-            const objectStore = transaction.objectStore('images');
-            const request = objectStore.getAll();
-
-            request.onsuccess = function(event) {
-                const images = event.target.result;
-                updateGallery(images);
-            };
-        }
-
-        // Guardar imagen en IndexedDB
-        function saveImage(imageDataUrl) {
-            const transaction = db.transaction(['images'], 'readwrite');
-            const objectStore = transaction.objectStore('images');
-            const request = objectStore.add({ data: imageDataUrl });
-
-            request.onsuccess = function(event) {
-                loadImages();
-            };
-
-            request.onerror = function(event) {
-                console.error('Error al guardar la imagen:', event.target.errorCode);
-            };
-        }
-
-        // Eliminar imagen de IndexedDB
-        function deleteImage(id) {
-            const transaction = db.transaction(['images'], 'readwrite');
-            const objectStore = transaction.objectStore('images');
-            const request = objectStore.delete(id);
-
-            request.onsuccess = function(event) {
-                loadImages();
-            };
-
-            request.onerror = function(event) {
-                console.error('Error al eliminar la imagen:', event.target.errorCode);
-            };
-        }
-
-        // Reemplazar imagen en IndexedDB
-        function replaceImage(id, imageDataUrl) {
-            const transaction = db.transaction(['images'], 'readwrite');
-            const objectStore = transaction.objectStore('images');
-            const request = objectStore.put({ id: id, data: imageDataUrl });
-
-            request.onsuccess = function(event) {
-                loadImages();
-            };
-
-            request.onerror = function(event) {
-                console.error('Error al reemplazar la imagen:', event.target.errorCode);
-            };
-        }
+        // Inicializar Firebase
+        firebase.initializeApp(firebaseConfig);
+        const storage = firebase.storage();
+        const database = firebase.database();
 
         // Asignar eventos al cargar el DOM
         document.addEventListener('DOMContentLoaded', () => {
-            initDB();
+            loadImages();
 
             // Elementos del DOM
             const dropArea = document.getElementById('drop-area');
@@ -155,21 +94,56 @@
 
         // Manejar archivos seleccionados
         function handleFiles(files) {
-            [...files].forEach(previewFile);
+            [...files].forEach(uploadFile);
         }
 
-        // Previsualizar y almacenar archivos
-        function previewFile(file) {
-            const reader = new FileReader();
-            reader.readAsDataURL(file);
-            reader.onload = function(event) {
-                const imageDataUrl = event.target.result;
-                saveImage(imageDataUrl);
+        // Subir archivo a Firebase Storage
+        function uploadFile(file) {
+            const storageRef = storage.ref('images/' + file.name);
+            const uploadTask = storageRef.put(file);
+
+            uploadTask.on('state_changed',
+                (snapshot) => {
+                    // Progreso de la carga (opcional)
+                },
+                (error) => {
+                    console.error('Error al cargar el archivo:', error);
+                    alert('Se produjo un error al cargar la imagen.');
+                },
+                () => {
+                    // Carga exitosa
+                    uploadTask.snapshot.ref.getDownloadURL().then((downloadURL) => {
+                        saveImageData(file.name, downloadURL);
+                    });
+                }
+            );
+        }
+
+        // Guardar datos de la imagen en Firebase Database
+        function saveImageData(fileName, downloadURL) {
+            const imageData = {
+                name: fileName,
+                url: downloadURL
             };
-            reader.onerror = function(error) {
-                console.error('Error al leer el archivo:', error);
-                alert('Se produjo un error al cargar la imagen.');
-            };
+            const newImageKey = database.ref().child('images').push().key;
+            const updates = {};
+            updates['/images/' + newImageKey] = imageData;
+            database.ref().update(updates).then(() => {
+                loadImages();
+            });
+        }
+
+        // Cargar imágenes desde Firebase Database
+        function loadImages() {
+            database.ref('images/').once('value').then((snapshot) => {
+                const images = [];
+                snapshot.forEach((childSnapshot) => {
+                    const imageData = childSnapshot.val();
+                    imageData.key = childSnapshot.key;
+                    images.push(imageData);
+                });
+                updateGallery(images);
+            });
         }
 
         // Actualizar galería
@@ -183,9 +157,9 @@
                 document.getElementById('placeholder-text').style.display = 'none';
             }
 
-            images.forEach((imageObj) => {
-                const imageSrc = imageObj.data;
-                const id = imageObj.id;
+            images.forEach((imageData) => {
+                const imageSrc = imageData.url;
+                const key = imageData.key;
 
                 const div = document.createElement('div');
                 div.classList.add('relative', 'group');
@@ -200,7 +174,7 @@
                 deleteBtn.setAttribute('aria-label', 'Eliminar imagen');
                 deleteBtn.classList.add('absolute', 'top-2', 'right-2', 'bg-red-500', 'text-white', 'rounded-full', 'w-8', 'h-8', 'flex', 'items-center', 'justify-center', 'opacity-0', 'group-hover:opacity-100', 'transition');
                 deleteBtn.onclick = () => {
-                    deleteImage(id);
+                    deleteImage(key, imageData.name);
                 };
 
                 // Botón de sustituir
@@ -214,16 +188,7 @@
                     fileInput.accept = 'image/*';
                     fileInput.onchange = () => {
                         const file = fileInput.files[0];
-                        const reader = new FileReader();
-                        reader.readAsDataURL(file);
-                        reader.onload = function(event) {
-                            const imageDataUrl = event.target.result;
-                            replaceImage(id, imageDataUrl);
-                        };
-                        reader.onerror = function(error) {
-                            console.error('Error al leer el archivo:', error);
-                            alert('Se produjo un error al cargar la imagen.');
-                        };
+                        replaceImage(key, imageData.name, file);
                     };
                     fileInput.click();
                 };
@@ -233,6 +198,27 @@
                 div.appendChild(replaceBtn);
                 gallery.appendChild(div);
             });
+        }
+
+        // Eliminar imagen de Firebase
+        function deleteImage(key, fileName) {
+            // Eliminar de Firebase Storage
+            const storageRef = storage.ref('images/' + fileName);
+            storageRef.delete().then(() => {
+                // Eliminar de Firebase Database
+                database.ref('images/' + key).remove().then(() => {
+                    loadImages();
+                });
+            }).catch((error) => {
+                console.error('Error al eliminar la imagen:', error);
+                alert('No se pudo eliminar la imagen.');
+            });
+        }
+
+        // Reemplazar imagen en Firebase
+        function replaceImage(key, oldFileName, newFile) {
+            deleteImage(key, oldFileName);
+            uploadFile(newFile);
         }
     </script>
 </body>
