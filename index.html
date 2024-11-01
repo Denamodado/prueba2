@@ -98,7 +98,8 @@
 
         // Subir archivo a Firebase Storage
         function uploadFile(file) {
-            const storageRef = storage.ref('images/' + Date.now() + '_' + file.name);
+            const uniqueFileName = Date.now() + '_' + file.name;
+            const storageRef = storage.ref('images/' + uniqueFileName);
             const uploadTask = storageRef.put(file);
 
             uploadTask.on('state_changed',
@@ -112,7 +113,7 @@
                 () => {
                     // Carga exitosa
                     uploadTask.snapshot.ref.getDownloadURL().then((downloadURL) => {
-                        saveImageData(file.name, downloadURL);
+                        saveImageData(uniqueFileName, downloadURL);
                     });
                 }
             );
@@ -121,7 +122,7 @@
         // Guardar datos de la imagen en Firebase Database
         function saveImageData(fileName, downloadURL) {
             const imageData = {
-                name: fileName,
+                fileName: fileName,
                 url: downloadURL,
                 timestamp: Date.now()
             };
@@ -174,7 +175,7 @@
                 deleteBtn.setAttribute('aria-label', 'Eliminar imagen');
                 deleteBtn.classList.add('absolute', 'top-2', 'right-2', 'bg-red-500', 'text-white', 'rounded-full', 'w-8', 'h-8', 'flex', 'items-center', 'justify-center', 'opacity-0', 'group-hover:opacity-100', 'transition');
                 deleteBtn.onclick = () => {
-                    deleteImage(key, imageData.name);
+                    deleteImage(key, imageData.fileName);
                 };
 
                 div.appendChild(img);
@@ -186,7 +187,7 @@
         // Eliminar imagen de Firebase
         function deleteImage(key, fileName) {
             // Eliminar de Firebase Storage
-            const storageRef = storage.refFromURL(fileName);
+            const storageRef = storage.ref('images/' + fileName);
             storageRef.delete().then(() => {
                 // Eliminar de Firebase Database
                 database.ref('images/' + key).remove().then(() => {
