@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mini Gestor de Proyectos</title>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body {
+      font-family: 'Montserrat', sans-serif;
+    }
+    .bg-custom {
+      background-color: #f5f0e1; /* Beige claro */
+    }
+    .bg-card {
+      background-color: #fff; /* Blanco para tarjetas */
+    }
+    .text-primary {
+      color: #4b3c2e; /* Marrón oscuro */
+    }
+    .text-secondary {
+      color: #6b5c4b; /* Marrón medio */
+    }
+    .border-custom {
+      border-color: #c3b1a3; /* Beige oscuro */
+    }
+    .btn-primary {
+      background-color: #5a7f45; /* Verde oliva */
+      color: white;
+    }
+    .btn-secondary {
+      background-color: #c3b1a3; /* Beige oscuro */
+      color: white;
+    }
+  </style>
+</head>
+<body class="bg-custom min-h-screen flex flex-col items-center p-4">
+
+  <!-- App Header -->
+  <header class="w-full text-center mb-4">
+    <h1 class="text-4xl font-bold text-primary">Mini Gestor de Proyectos</h1>
+    <p class="text-secondary">Organiza tus proyectos de forma visual</p>
+  </header>
+
+  <!-- Kanban Board -->
+  <div id="kanbanBoard" class="grid grid-cols-3 gap-4 w-full max-w-4xl">
+    <div class="column bg-card p-4 rounded-lg shadow">
+      <h2 class="text-2xl font-semibold mb-2 text-primary">To Do</h2>
+      <div id="todo" class="kanban-column" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+    </div>
+    <div class="column bg-card p-4 rounded-lg shadow">
+      <h2 class="text-2xl font-semibold mb-2 text-primary">In Progress</h2>
+      <div id="inProgress" class="kanban-column" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+    </div>
+    <div class="column bg-card p-4 rounded-lg shadow">
+      <h2 class="text-2xl font-semibold mb-2 text-primary">Done</h2>
+      <div id="done" class="kanban-column" ondrop="drop(event)" ondragover="allowDrop(event)"></div>
+    </div>
+  </div>
+
+  <!-- Add Project Button -->
+  <button onclick="openProjectModal()" class="mt-4 px-4 py-2 btn-primary rounded-lg shadow">Nuevo Proyecto</button>
+
+  <!-- Project Modal -->
+  <div id="projectModal" class="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center hidden">
+    <div class="bg-card p-4 w-96 rounded-lg shadow">
+      <h3 id="modalTitle" class="text-2xl font-bold mb-4 text-primary">Nuevo Proyecto</h3>
+      <input id="projectTitle" type="text" placeholder="Nombre del Proyecto" class="w-full p-2 border rounded mb-4 border-custom">
+      <textarea id="projectDescription" placeholder="Descripción del Proyecto" class="w-full p-2 border rounded mb-4 border-custom"></textarea>
+      
+      <!-- Drag-and-Drop Image Upload -->
+      <div 
+        id="dropZone" 
+        class="border-2 border-dashed border-custom p-4 rounded text-center text-secondary mb-4"
+        ondrop="handleDrop(event)" 
+        ondragover="allowDrop(event)"
+      >
+        Arrastra las imágenes aquí o haz clic para seleccionarlas
+        <input 
+          id="projectImages" 
+          type="file" 
+          accept="image/*" 
+          multiple 
+          class="hidden" 
+          onchange="handleFileSelect(event)"
+        >
+      </div>
+      <div id="imagePreview" class="flex flex-wrap gap-2 mb-4"></div>
+
+      <div class="flex justify-end">
+        <button onclick="closeProjectModal()" class="px-4 py-2 btn-secondary rounded-lg">Cancelar</button>
+        <button onclick="saveProject()" class="px-4 py-2 btn-primary rounded-lg">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Placeholder -->
+  <div id="placeholder" class="flex flex-col items-center text-gray-400 mt-12">
+    <p class="text-2xl mb-4 text-primary">No hay proyectos aún</p>
+    <p>¡Empieza agregando un nuevo proyecto!</p>
+  </div>
+
+  <!-- Share Link Modal -->
+  <div id="shareModal" class="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center hidden">
+    <div class="bg-card p-4 w-80 rounded-lg shadow">
+      <h4 class="text-lg font-semibold mb-4 text-primary">Enlace para Compartir</h4>
+      <p id="shareLink" class="break-words bg-gray-100 p-2 rounded mb-4"></p>
+      <button onclick="copyShareLink()" class="btn-primary px-4 py-2 rounded-lg">Copiar Enlace</button>
+      <button onclick="closeShareModal()" class="ml-2 btn-secondary px-4 py-2 rounded-lg">Cerrar</button>
+    </div>
+  </div>
+
+  <script>
+    let projects = JSON.parse(localStorage.getItem("projects")) || [];
+    let editingProjectId = null;
+    let selectedImages = [];
+
+    // Load projects on page load
+    document.addEventListener("DOMContentLoaded", loadProjects);
+
+    function loadProjects() {
+      document.getElementById("kanbanBoard").style.display = projects.length ? "grid" : "none";
+      document.getElementById("placeholder").style.display = projects.length ? "none" : "flex";
+
+      const columns = { todo: [], inProgress: [], done: [] };
+      projects.forEach(project => columns[project.status].push(project));
+      renderProjects(columns);
+    }
+
+    function renderProjects(columns) {
+      ["todo", "inProgress", "done"].forEach(status => {
+        const column = document.getElementById(status);
+        column.innerHTML = "";
+        columns[status].forEach(project => {
+          const projectEl = document.createElement("div");
+          projectEl.className = "project p-4 bg-card rounded-lg shadow mb-2 cursor-pointer";
+          projectEl.draggable = true;
+          projectEl.ondragstart = e => drag(e, project.id);
+          projectEl.onclick = () => openProjectModal(project);
+          projectEl.innerHTML = `
+            <h4 class="font-semibold text-primary">${project.title}</h4>
+            <p class="text-sm text-secondary">${project.description}</p>
+            <button onclick="event.stopPropagation(); shareProject('${project.id}')" class="mt-2 text-blue-500 underline">Compartir</button>
+          `;
+          column.appendChild(projectEl);
+        });
+      });
+    }
+
+    function openProjectModal(project = null) {
+      const modal = document.getElementById("projectModal");
+      modal.classList.remove("hidden");
+      editingProjectId = project ? project.id : null;
+      document.getElementById("modalTitle").innerText = project ? "Editar Proyecto" : "Nuevo Proyecto";
+      document.getElementById("projectTitle").value = project ? project.title : "";
+      document.getElementById("projectDescription").value = project ? project.description : "";
+      document.getElementById("projectImages").value = "";
+      selectedImages = project && project.images ? project.images.slice() : [];
+      renderImagePreview();
+    }
+
+    function closeProjectModal() {
+      document.getElementById("projectModal").classList.add("hidden");
+      selectedImages = [];
+    }
+
+    function saveProject() {
+      const title = document.getElementById("projectTitle").value;
+      const description = document.getElementById("projectDescription").value;
+
+      if (!title) {
+        alert("Por favor, ingrese un nombre para el proyecto.");
+        return;
+      }
+
+      const newProject = {
+        id: editingProjectId || new Date().getTime().toString(),
+        title,
+        description,
+        images: selectedImages,
+        status: "todo"
+      };
+
+      if (editingProjectId) {
+        const index = projects.findIndex(p => p.id === editingProjectId);
+        projects[index] = newProject;
+      } else {
+        projects.push(newProject);
+      }
+
+      localStorage.setItem("projects", JSON.stringify(projects));
+      closeProjectModal();
+      loadProjects();
+    }
+
+    function allowDrop(event) {
+      event.preventDefault();
+    }
+
+    function drag(event, projectId) {
+      event.dataTransfer.setData("projectId", projectId);
+    }
+
+    function drop(event) {
+      event.preventDefault();
+      const projectId = event.dataTransfer.getData("projectId");
+      const newStatus = event.currentTarget.id;
+      const project = projects.find(p => p.id === projectId);
+      project.status = newStatus;
+      localStorage.setItem("projects", JSON.stringify(projects));
+      loadProjects();
+    }
+
+    function shareProject(id) {
+      const project = projects.find(p => p.id === id);
+      const shareLink = `https://myapp.local/proyecto/${project.id}`;
+      document.getElementById("shareLink").textContent = shareLink;
+      document.getElementById("shareModal").classList.remove("hidden");
+    }
+
+    function copyShareLink() {
+      const shareLink = document.getElementById("shareLink").textContent;
+      navigator.clipboard.writeText(shareLink).then(() => {
+        alert("Enlace copiado al portapapeles");
+      });
+    }
+
+    function closeShareModal() {
+      document.getElementById("shareModal").classList.add("hidden");
+    }
+
+    function handleFileSelect(event) {
+      const files = event.target.files || event.dataTransfer.files;
+      Array.from(files).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = e => {
+          selectedImages.push(e.target.result);
+          renderImagePreview();
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function handleDrop(event) {
+      event.preventDefault();
+      handleFileSelect(event);
+    }
+
+    function renderImagePreview() {
+      const previewContainer = document.getElementById("imagePreview");
+      previewContainer.innerHTML = "";
+      selectedImages.forEach(src => {
+        const img = document.createElement("img");
+        img.src = src;
+        img.className = "w-24 h-24 object-cover rounded-lg shadow";
+        previewContainer.appendChild(img);
+      });
+    }
+
+    document.getElementById("dropZone").addEventListener("click", () => {
+      document.getElementById("projectImages").click();
+    });
+  </script>
+</body>
+</html>
